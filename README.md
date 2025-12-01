@@ -4,7 +4,7 @@
 
 This project repurposes the ESP32 as a wearable, self-contained data acquisition platform. The main goal is to generate large, labelled datasets of human walking activity under real-world conditions.
 
-The collected data will be a multivariate time series suitable for training classification models (e.g., CNNs or LSTMs) to distinguish between different walking styles, speeds, or activities (e.g., walking, running, ascending stairs).
+The collected data will be a multivariate time series suitable for training classification models (e.g., CNNs or LSTMs) to distinguish between different walking styles, speeds, or activities (e.g., walking, running, ascending hills or stairs).
 
 ---
 
@@ -16,7 +16,7 @@ The collected data will be a multivariate time series suitable for training clas
 
 ### **GPS6MV2**
 - Provides location, velocity, and altitude data.
-- Enables the correlation of movement patterns with environmental context (e.g., changes in speed or terrain).
+- Enables correlation of movement patterns with environmental context (e.g., changes in terrain, gradients, or speed).
 
 ### **Micro SD Card**
 - Stores gigabytes of high-frequency data generated during long-duration walks.
@@ -62,7 +62,7 @@ Each line written to the SD card is a timestamped observation, ready for import 
 
 Primary ML task: **Classification**
 
-Given a one-second window of engineered features, classify the activity into one of:
+Given a one-second window of engineered features, classify the activity into one of the following types:
 
 - Standing still  
 - Level walking (slow)  
@@ -71,6 +71,8 @@ Given a one-second window of engineered features, classify the activity into one
 - Running  
 - Transitional/resting (stopping, starting, sitting down, standing up)  
 - Anomalous gait (limping, carrying a heavy load, shuffling)
+
+These may be replaced or augmented by the expanded GPS-only categories listed below.
 
 ---
 
@@ -109,10 +111,10 @@ Derived features are less noisy and more orientation-stable than raw IMU signals
 
 ### 3. Data Labelling Strategy
 
-Assign ground-truth activity classes to each one-second segment using GPS/IMU data.
+Assign ground-truth activity classes using GPS and IMU data:
 
 #### **Speed-Based Classification**
-Use GPS speed thresholds to auto-label:
+Use GPS speed thresholds to automatically label:
 - Standing  
 - Walking  
 - Running  
@@ -126,4 +128,136 @@ Use rate of change:
 Use bounding boxes (geofencing) for known environments to label activities with high certainty.
 
 ---
+
+# 🗂️ Refined & More Interesting GPS-Derived Activity Categories
+
+Below is an expanded set of activity categories designed to be labelled automatically using **GPS-only data**. These categories introduce more variety and contextual nuance while remaining suitable for automated, high-confidence annotation using speed, altitude rate, heading changes, and geofencing.
+
+---
+
+## 🚶 Standard Gait & Mobility Categories (GPS Only)
+
+### **1. Stationary**
+- **GPS condition:** Speed < 0.3 knots for ≥ 5 seconds  
+- Includes standing still, resting, or waiting.
+
+### **2. Slow Walking**
+- **GPS condition:** 0.3–2.3 knots  
+- Typical of cautious or leisurely movement.
+
+### **3. Normal Walking**
+- **GPS condition:** 2.3–4.0 knots  
+- Baseline, comfortable gait speed.
+
+### **4. Fast / Brisk Walking**
+- **GPS condition:** 4.0–6.0 knots  
+- Often seen in purposeful or fitness-oriented walking.
+
+### **5. Running / Jogging**
+- **GPS condition:** > 6 knots  
+- Easily separable based on speed.
+
+---
+
+## 🧗 Terrain & Gradient-Related Categories
+
+Uses altitude change rate (dAltitude/dt):
+
+### **6. Uphill Walking**
+- **GPS condition:**  
+  - Speed < 6 knots  
+  - dAltitude/dt > +0.5 m/s  
+
+### **7. Downhill Walking**
+- **GPS condition:**  
+  - Speed < 6 knots  
+  - dAltitude/dt < –0.5 m/s  
+
+### **8. Stair Climbing / Rapid Elevation Change**
+- **GPS condition:**  
+  - Sharp altitude increases (e.g., 2–4 m in < 10 s)  
+- Best labelled via geofencing due to GPS altitude noise.
+
+---
+
+## 🧭 Contextual & Path-Shape Categories (GPS Geometry)
+
+### **9. Zig-Zag / Curved Path Walking**
+- **GPS condition:** Frequent heading changes > 30°  
+- Represents obstacle avoidance or crowded environments.
+
+### **10. Straight-Line Walking**
+- **GPS condition:** Heading variance < 5°  
+- Ideal for controlled gait studies.
+
+### **11. Stop–Start Transitional Walking**
+- **GPS condition:** Frequent switching between stationary and slow walking  
+- Captures gait initiation and termination.
+
+---
+
+## 🎒 Activity Context Categories (GPS Region or Behaviour)
+
+### **12. Indoor vs Outdoor Walking**
+- Indoor GPS characteristics:  
+  - Reduced precision  
+  - Fewer satellites  
+  - Erratic speed readings  
+- Label via geofencing.
+
+### **13. Urban Walking (Dense Environment)**
+- Frequent speed interruptions  
+- Higher satellite drop-outs  
+- Numerous direction changes  
+- Label by mapping urban polygons.
+
+### **14. Open-Field / Park Walking**
+- Longer straight segments  
+- More stable speed  
+- Lower heading variance  
+- Geofence outdoor areas.
+
+---
+
+## 🧳 Real-World Gait Challenge Categories
+
+### **15. Walking With Load**
+- **GPS proxies:**  
+  - Reduced comfortable walking speed  
+  - Lower speed variability  
+- Best combined with route-based labels.
+
+### **16. Route-Following Navigation**
+- **GPS condition:** Path matches a predefined GPX route.  
+
+### **17. Random Exploration**
+- **GPS condition:** High heading variance, no consistent direction.
+
+---
+
+## ⭐ Recommended Final Category Set (GPS Labelled)
+
+A balanced and varied set ideal for training robust HAR/TinyML models:
+
+1. **Stationary**  
+2. **Slow Walking**  
+3. **Normal Walking**  
+4. **Fast / Brisk Walking**  
+5. **Running / Jogging**  
+6. **Uphill Walking**  
+7. **Downhill Walking**  
+8. **Straight-Line Walking**  
+9. **Zig-Zag / Curved Path Walking**  
+10. **Stop–Start Transitional Walking**  
+11. **Urban Walking**  
+12. **Open-Field / Park Walking**
+
+This set provides rich variation in:
+- speed  
+- terrain gradient  
+- movement geometry  
+- environmental context  
+
+ensuring high-quality, generalisable HAR and gait classification models.
+
 
