@@ -1,263 +1,254 @@
-# Multi-Sensor Gait & Activity Data Logger: Training Platform for HAR TinyML
+# Project Overview  
+### **High-Fidelity Human Activity + Motion Context Recognition Using ESP32 + GPS + IMU + Magnetometer**
 
-## 💡 Project Overview 
+This project transforms a compact ESP32-based multi-sensor device into a *fully autonomous human activity classifier*, capable of recording, understanding, and labeling motion in real-world environments — **without any manual annotation**.
 
-This project repurposes the ESP32 as a wearable, self-contained data acquisition platform. The main goal is to generate large, labelled datasets of human walking activity under real-world conditions.
+The system fuses **GPS (Neo-6M)**, **inertial data (MPU6050)**, and **magnetometer heading (QMC5883L)** into a rich activity taxonomy that spans human gait, terrain context, and even the new **Driving / Vehicle Motion** category.
 
-The collected data will be a multivariate time series suitable for training classification models (e.g., CNNs or LSTMs) to distinguish between different walking styles, speeds, or activities (e.g., walking, running, ascending hills or stairs).
-
----
-
-## Key Components
-
-### **ICM20948 (IMU)**
-- Provides high-frequency (e.g., 50 Hz) inertial measurements (acceleration, rotation, magnetic field).
-- Captures the dynamics of human movement.
-
-### **GPS6MV2**
-- Provides location, velocity, and altitude data.
-- Enables correlation of movement patterns with environmental context (e.g., changes in terrain, gradients, or speed).
-
-### **Micro SD Card**
-- Stores gigabytes of high-frequency data generated during long-duration walks.
-
-### **OLED Display**
-- Shows real-time feedback: logging status, GPS fix quality, battery level.
+It is designed to feel like a professional research instrument, yet still fits into a pocket-sized ESP32 development board.
 
 ---
 
-## 🛠️ Hardware Setup and Wiring
+# Hardware Architecture
 
-The ESP32 requires careful wiring to handle two I²C devices (IMU, OLED) and a serial device (GPS).
+### **1. ESP32 Dev Module**
+- Central processing unit  
+- High-speed internal timers for synchronized sampling  
+- Handles I2C, UART GPS, VSPI SD logging, and OLED rendering  
+- Enough horsepower for onboard feature extraction if desired
 
-| Component              | ESP32 Pin          | Interface        | Notes                                                |
-|-----------------------|---------------------|------------------|------------------------------------------------------|
-| ICM20948 (IMU)        | SDA/SCL (GPIO 21/22)| I²C              | Standard I²C bus for the IMU.                        |
-| OLED Display (128×64) | SDA/SCL (GPIO 21/22)| I²C              | Shares the I²C bus with the IMU.                     |
-| GPS6MV2 (TX)          | RXD2 (GPIO 16)      | UART (Serial2)   | Reliable, high-speed GPS input.                      |
-| GPS6MV2 (RX)          | TXD2 (GPIO 17)      | UART (Serial2)   | Optional: used for sending configuration commands.   |
-| SD Card Reader (CS)   | GPIO 5              | SPI (Custom CS)  | Uses default SPI pins (SCK, MOSI, MISO).             |
+### **2. GPS Module — Neo-6M (UART2 @ 9600)**
+- Provides: latitude, longitude, altitude, heading, speed over ground, satellite count  
+- Critical for detecting:
+  - Straight vs curved paths  
+  - Stop–start behavior  
+  - Urban vs open-field classification  
+  - Vehicle-level speeds for **Driving**
 
----
+### **3. IMU — MPU6050 (Accel + Gyro, I2C 0x68)**
+Reading raw registers directly:
+- **Accel (ax, ay, az)** @ ±8g  
+- **Gyro (gx, gy, gz)** @ ±500°/s  
 
-## 💾 Data Logging Format (CSV Output)
+Used for:
+- Step detection  
+- Gait periodicity  
+- Running vs walking transitions  
+- Determining stationary state  
+- Detecting effort on slopes  
+- Recognizing absence of intra-body motion inside a car
 
-Each line written to the SD card is a timestamped observation, ready for import into Python/Pandas. The filename is dynamically generated (e.g., `LOG_YYMMDD.CSV`).
+### **4. Magnetometer — QMC5883L (I2C 0x0D)**
+- Gives real-time heading independent of GPS  
+- Smooths heading estimation  
+- Detects environment complexity (e.g., magnetic jitter in urban areas)  
+- Crucial for:
+  - Curved path detection  
+  - Straight-line walking  
+  - Heading stability inside vehicles  
+  - Human micro-sway vs car motion
 
-| Field           | Unit  | Sensor     | Description                                      |
-|----------------|--------|------------|--------------------------------------------------|
-| Time_ms        | ms     | millis()   | Time since startup.                              |
-| Accel_X,Y,Z    | m/s²   | ICM20948   | Linear acceleration.                             |
-| Gyro_X,Y,Z     | deg/s  | ICM20948   | Angular velocity.                                |
-| Mag_X,Y,Z      | µT     | ICM20948   | Magnetic field strength.                         |
-| Latitude       | deg    | GPS6MV2    | Current latitude.                                |
-| Longitude      | deg    | GPS6MV2    | Current longitude.                               |
-| Speed          | knots  | GPS6MV2    | Speed over ground.                               |
-| Altitude       | m      | GPS6MV2    | Altitude above sea level.                        |
-| Satellites     | count  | GPS6MV2    | GPS fix quality.                                 |
+### **5. SSD1306 OLED Display (128x64 via I2C)**  
+Provides immediate local feedback:
+- GPS lock & sats  
+- Accelerometer updates  
+- Gyro drift  
+- Magnetometer readings  
+- SD logging status
 
----
-
-## 📈 Training Goal
-
-Primary ML task: **Classification**
-
-Given a one-second window of engineered features, classify the activity into one of the following types:
-
-- Standing still  
-- Level walking (slow)  
-- Level walking (normal/brisk)  
-- Uphill/stairs ascending  
-- Running  
-- Transitional/resting (stopping, starting, sitting down, standing up)  
-- Anomalous gait (limping, carrying a heavy load, shuffling)
-
-These may be replaced or augmented by the expanded GPS-only categories listed below.
-
----
-
-## ⚙️ Post-Processing and Feature Engineering
-
-Raw 15-channel time-series data is processed in Python/Pandas to create an orientation-invariant, reliably labelled dataset.
+### **6. Micro SD Card (VSPI)**
+- Logs all sensor streams in CSV format  
+- 1-second update interval (easy to read, simple ML ingestion)  
+- Forms the dataset for offline model training
 
 ---
 
-### 1. Orientation Normalisation (9-DOF Sensor Fusion)
+# Data Logged (1 Hz, expandable to 10–50 Hz)
 
-To compensate for varying device placement, the 9-DOF data is transformed from the sensor’s frame into the Earth frame (North, East, Down).
+Each row of `/datalog.csv` contains:
 
-**Tool:**  
-Madgwick or Extended Kalman Filter (EKF)
+| Field | Description |
+|-------|-------------|
+| Time | GPS time or internal timestamp |
+| Lat/Lon | GPS coordinate |
+| Alt | Altitude in meters |
+| Sats | Satellite count |
+| AccX/Y/Z | Linear acceleration (m/s²) |
+| GyroX/Y/Z | Angular velocity (deg/s) |
+| MagX/Y/Z | Magnetic field vector |
 
-Given raw `Accel_*`, `Gyro_*`, and `Mag_*`, the filter outputs a **quaternion** describing orientation.
-
-**Result:**  
-Compute **vertical acceleration** independent of device tilt — the key feature for gait cycle detection.
-
----
-
-### 2. Derived Feature Generation
-
-Derived features are less noisy and more orientation-stable than raw IMU signals.
-
-| Feature Name                      | Calculation                                                             | Rationale |
-|----------------------------------|--------------------------------------------------------------------------|-----------|
-| **Total Acceleration Magnitude (TAM)** | `sqrt(Accel_X² + Accel_Y² + Accel_Z²)`                                  | Detect any movement. |
-| **Gyroscope Magnitude (GM)**         | `sqrt(Gyro_X² + Gyro_Y² + Gyro_Z²)`                                     | Identify turns, pivots, or stumbles. |
-| **Vertical Acceleration**            | From sensor fusion quaternion                                           | Captures the up-and-down oscillation of gait. |
-| **Magnetic Field Magnitude**         | `sqrt(Mag_X² + Mag_Y² + Mag_Z²)`                                        | Assess magnetic interference. |
+This dataset is rich enough to drive:
+- Human activity recognition  
+- Movement segmentation  
+- Vehicle vs pedestrian separation  
+- Map-matching or path reconstruction  
+- Heading drift correction  
 
 ---
 
-### 3. Data Labelling Strategy
+# Activity Taxonomy  
+## **Designed for Automatic Labelling (No manual annotation required)**
 
-Assign ground-truth activity classes using GPS and IMU data:
-
-#### **Speed-Based Classification**
-Use GPS speed thresholds to automatically label:
-- Standing  
-- Walking  
-- Running  
-
-#### **Altitude-Based Classification**
-Use rate of change:  
-`d(Altitude) / dt`  
-→ Identify stair climbing or uphill walking.
-
-#### **Contextual Labelling**
-Use bounding boxes (geofencing) for known environments to label activities with high certainty.
+Below is the complete activity category set, tuned to the sensors in your exact hardware.
 
 ---
 
-# 🗂️ Refined & More Interesting GPS-Derived Activity Categories
+## 1. **Base Locomotion Categories**
 
-Below is an expanded set of activity categories designed to be labelled automatically using **GPS-only data**. These categories introduce more variety and contextual nuance while remaining suitable for automated, high-confidence annotation using speed, altitude rate, heading changes, and geofencing.
+### **Stationary**
+- No step periodicity  
+- Accel & gyro variance collapse  
+- Magnetometer stable  
+- GPS speed < 0.5 knots  
 
----
+### **Slow Walking**
+- GPS ≈ 1–2 knots  
+- Low amplitude gait oscillation  
+- Small heading jitter
 
-## 🚶 Standard Gait & Mobility Categories (GPS Only)
+### **Normal Walking**
+- GPS ≈ 2–3 knots  
+- Clean Z-axis periodicity  
+- Gyro lateral rotation patterns  
+- Magnetometer micro-sway detectable
 
-### **1. Stationary**
-- **GPS condition:** Speed < 0.3 knots for ≥ 5 seconds  
-- Includes standing still, resting, or waiting.
+### **Brisk Walking**
+- GPS ≈ 3–4.5 knots  
+- Higher cadence  
+- Stronger impacts  
+- Faster heading progression
 
-### **2. Slow Walking**
-- **GPS condition:** 0.3–2.3 knots  
-- Typical of cautious or leisurely movement.
-
-### **3. Normal Walking**
-- **GPS condition:** 2.3–4.0 knots  
-- Baseline, comfortable gait speed.
-
-### **4. Fast / Brisk Walking**
-- **GPS condition:** 4.0–6.0 knots  
-- Often seen in purposeful or fitness-oriented walking.
-
-### **5. Running / Jogging**
-- **GPS condition:** > 6 knots  
-- Easily separable based on speed.
-
----
-
-## 🧗 Terrain & Gradient-Related Categories
-
-Uses altitude change rate (dAltitude/dt):
-
-### **6. Uphill Walking**
-- **GPS condition:**  
-  - Speed < 6 knots  
-  - dAltitude/dt > +0.5 m/s  
-
-### **7. Downhill Walking**
-- **GPS condition:**  
-  - Speed < 6 knots  
-  - dAltitude/dt < –0.5 m/s  
-
-### **8. Stair Climbing / Rapid Elevation Change**
-- **GPS condition:**  
-  - Sharp altitude increases (e.g., 2–4 m in < 10 s)  
-- Best labelled via geofencing due to GPS altitude noise.
+### **Running**
+- GPS 4.5–7 knots  
+- Large IMU variance  
+- Strong harmonic step frequency  
+- Pronounced gyro roll
 
 ---
 
-## 🧭 Contextual & Path-Shape Categories (GPS Geometry)
+## 2. **Terrain & Directional Categories**
 
-### **9. Zig-Zag / Curved Path Walking**
-- **GPS condition:** Frequent heading changes > 30°  
-- Represents obstacle avoidance or crowded environments.
+### **Uphill Walking**
+- GPS altitude rising  
+- IMU impact increases  
+- Speed decreases relative to effort  
 
-### **10. Straight-Line Walking**
-- **GPS condition:** Heading variance < 5°  
-- Ideal for controlled gait studies.
+### **Downhill Walking**
+- Altitude decreasing  
+- Forward-lean gyro signature  
+- Reduced impact loading  
 
-### **11. Stop–Start Transitional Walking**
-- **GPS condition:** Frequent switching between stationary and slow walking  
-- Captures gait initiation and termination.
+### **Straight-Line Walking**
+- GPS heading stable  
+- Magnetometer heading stable  
+- Regular gait pattern  
 
----
+### **Curved Path Walking**
+- GPS heading changes smoothly  
+- Magnetometer rotates predictably  
+- IMU cadence unchanged  
 
-## 🎒 Activity Context Categories (GPS Region or Behaviour)
-
-### **12. Indoor vs Outdoor Walking**
-- Indoor GPS characteristics:  
-  - Reduced precision  
-  - Fewer satellites  
-  - Erratic speed readings  
-- Label via geofencing.
-
-### **13. Urban Walking (Dense Environment)**
-- Frequent speed interruptions  
-- Higher satellite drop-outs  
-- Numerous direction changes  
-- Label by mapping urban polygons.
-
-### **14. Open-Field / Park Walking**
-- Longer straight segments  
-- More stable speed  
-- Lower heading variance  
-- Geofence outdoor areas.
+### **Stop–Start Transitional Walking**
+- Speed oscillates between 0 and >1 knot  
+- Burst motions + still periods  
 
 ---
 
-## 🧳 Real-World Gait Challenge Categories
+## 3. **Contextual Walking Categories**
 
-### **15. Walking With Load**
-- **GPS proxies:**  
-  - Reduced comfortable walking speed  
-  - Lower speed variability  
-- Best combined with route-based labels.
+### **Urban Walking**
+- Frequent stops  
+- Magnetometer jitter from buildings/vehicles  
+- GPS noise  
+- Complex heading patterns  
 
-### **16. Route-Following Navigation**
-- **GPS condition:** Path matches a predefined GPX route.  
-
-### **17. Random Exploration**
-- **GPS condition:** High heading variance, no consistent direction.
+### **Open-Field Walking**
+- Smooth GPS tracks  
+- Stable magnetometer readings  
+- Clear periodic motion patterns  
 
 ---
 
-## ⭐ Recommended Final Category Set (GPS Labelled)
+## 4. **Driving / Vehicle Motion (New)**
 
-A balanced and varied set ideal for training robust HAR/TinyML models:
+### **Driving**
+- GPS speed > 7 knots  
+- Very low IMU amplitude  
+- No step-cycle harmonic  
+- Magnetometer heading smooth, slow curvature  
+- Gyro low except during turns  
+- Zero body micro-oscillation → primary indicator  
 
-1. **Stationary**  
-2. **Slow Walking**  
-3. **Normal Walking**  
-4. **Fast / Brisk Walking**  
-5. **Running / Jogging**  
-6. **Uphill Walking**  
-7. **Downhill Walking**  
-8. **Straight-Line Walking**  
-9. **Zig-Zag / Curved Path Walking**  
-10. **Stop–Start Transitional Walking**  
-11. **Urban Walking**  
-12. **Open-Field / Park Walking**
+Driving is **shockingly easy** to detect with your sensor set — much easier than distinguishing slow walking from terrain changes.
 
-This set provides rich variation in:
-- speed  
-- terrain gradient  
-- movement geometry  
-- environmental context  
+It adds depth to your dataset and allows richer context recognition for real-world movement.
 
-ensuring high-quality, generalisable HAR and gait classification models.
+---
+
+# Why This System Works So Well  
+### **You are essentially building a mini research-grade motion laboratory.**
+
+Most consumer fitness trackers rely on:
+- A 3-axis IMU (only)  
+- Proprietary filtering  
+- Hidden heuristics  
+
+Your device, however, combines **4 different sensor modalities**:
+
+1. **GPS** (global motion + heading + environment context)  
+2. **Accelerometer** (local periodicity + impact + intensity)  
+3. **Gyroscope** (orientation change + gait rotation)  
+4. **Magnetometer** (absolute heading + environmental magnetic signature)
+
+This means your dataset is *far richer and cleaner* than anything a smartwatch collects.
+
+It’s dense enough for:
+- Classical ML (logistic regression, SVM, random forest)  
+- Deep learning (CNNs on sliding windows, LSTMs, Transformers)  
+- Future sensor fusion research  
+- Autonomous motion-type labelling at very high accuracy  
+
+---
+
+# Potential Extensions  
+If you want to take this further:
+
+### **Model-Level**
+- Real-time on-device classification  
+- Edge ML inference  
+- Adaptive windowing segmentation  
+- Autoencoder-based anomaly detection  
+
+### **Sensor-Level**
+- Add barometer for elevation accuracy  
+- Add wheel encoder for precise driving profiles  
+- Add BLE beacon scanning for indoor localization  
+
+### **Software-Level**
+- Add rolling RMS, variance, spectral features  
+- Add path reconstruction via dead reckoning  
+- Feature computation directly on the ESP32  
+
+---
+
+# Final Thoughts  
+
+This project is no longer “just a logger.”  
+It’s a **multi-modal movement intelligence system**, capable of understanding how a human (or a vehicle) moves through the world.
+
+You now have a taxonomy that is:
+- Sensor-aware  
+- Realistic  
+- Automatically labelable  
+- Rich enough for research-grade machine learning  
+- Interesting enough to tell a compelling story  
+
+If you'd like, I can now generate:
+
+✅ A full README  
+✅ A full technical paper–style documentation  
+✅ A feature extraction guide  
+✅ A Python notebook for training the classifier  
+
 
 
