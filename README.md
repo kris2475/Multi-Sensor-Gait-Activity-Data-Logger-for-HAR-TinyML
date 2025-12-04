@@ -70,30 +70,32 @@ Provides immediate local feedback:
 
 To maximise data richness while ensuring high-quality **labels**, the system uses a **Decoupled Sampling Architecture** resulting in two synchronised log files linked by the $\mathbf{\text{SampleID}}$.
 
-### **File 1: $\mathbf{\text{/sensor.csv}}$ (High-Frequency Input Data)**
-- **Rate:** $\mathbf{50 \text{ Hz}}$ (a new row every $\mathbf{20 \text{ ms}}$).
+### **File 1: `/sensor.csv` (High-Frequency Input Data)**
+- **Rate:** **50 Hz** (a new row every **20 ms**).
 - **Purpose:** Input features for Deep Learning models.
+
 | Field | Description |
 |-------|-------------|
-| **SampleID** | Continuous, running counter ($\mathbf{0, 1, 2, ...}$). Used as the temporal key. |
+| **SampleID** | Continuous, running counter (**0, 1, 2, ...**). Used as the temporal key. |
 | AccX/Y/Z | Linear acceleration ($\mathrm{m/s}^2$) |
 | GyroX/Y/Z | Angular velocity ($\text{deg/s}$) |
 | MagX/Y/Z | Magnetic field vector |
 
-### **File 2: $\mathbf{\text{/gps\_label.csv}}$ (Low-Frequency Ground-Truth Labels)**
-- **Rate:** $\mathbf{1 \text{ Hz}}$ (a new row every $\mathbf{1 \text{ second}}$).
+### **File 2: `/gps_label.csv` (Low-Frequency Ground-Truth Labels)**
+- **Rate:** **1 Hz** (a new row every **1 second**).
 - **Purpose:** Ground-truth **labels** for the $\approx 50$ sensor samples in the corresponding time window.
+
 | Field | Description |
 |-------|-------------|
-| **StartSampleID** | The $\mathbf{\text{SampleID}}$ where the 1-second GPS window *begins*. Used as the synchronisation key. |
+| **StartSampleID** | The **SampleID** where the 1-second GPS window *begins*. Used as the synchronisation key. |
 | Lat/Lon | GPS coordinate |
 | Alt | Altitude in metres |
 | Sats | Satellite count (Guaranteed $\ge 5$ due to fix gate) |
-| Speed\_kph | Speed over ground in $\mathrm{km/h}$ |
+| Speed_kph | Speed over ground in $\mathrm{km/h}$ |
 
 This dataset is rich enough to drive:
 - Human activity recognition  
-- **Motion-to-speed regression** (predicting $\mathbf{\text{Speed\_kph}}$ from IMU data)  
+- **Motion-to-speed regression** (predicting **Speed\_kph** from IMU data)  
 - Vehicle vs pedestrian separation  
 - Map-matching or path reconstruction  
 - Heading drift correction  
@@ -264,6 +266,4 @@ You now have a taxonomy that is:
 - Automatically **labellable**  
 - Rich enough for research-grade machine learning  
 - Interesting enough to tell a compelling story
-
-
 
